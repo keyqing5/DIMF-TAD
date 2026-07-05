@@ -1,0 +1,25 @@
+# 1. 使用官方的 Miniconda 基础镜像 (比完整的 Anaconda 小很多)
+FROM continuumio/miniconda3
+
+# 2. 设置工作目录
+WORKDIR /gpfs1/home/qiusliang2/synmf/env/
+
+# 3. 将本地导出的环境配置文件拷贝到镜像中
+COPY synmf.yml .
+
+# 4. 创建环境
+# 我们通常直接更新 base 环境，或者创建一个新环境
+# --file 指定配置文件，--prune 表示移除配置文件中没有的旧包
+RUN conda env update -n base -f synmf.yml && \
+    conda clean -afy
+
+# 5. 如果你的代码里有 pip 安装的包，Dockerfile 会自动处理 environment.yml 里的 pip 部分
+# 但如果你有额外的 requirements.txt，可以在这里安装：
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 6. 设置环境变量，确保 Python 能够找到包
+ENV PYTHONUNBUFFERED=1
+
+# 7. 默认命令
+CMD ["python", "--version"]
