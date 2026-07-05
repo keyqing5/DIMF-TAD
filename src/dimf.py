@@ -1071,20 +1071,20 @@ def plot_hierarchical_tad_heatmap(A, hierarchical_tads, title="Hierarchical TAD 
 
 
 if __name__ == "__main__":
-    write_tsv = "/gpfs1/home/qiusliang2/result8/hic/v7_182/"
+    write_tsv = ""
     data_stat = "sim"
     plot_name = ""
 
     max_K = 30
     resolution = 25000
 
-    home_root = "/gpfs1/home/qiusliang2/"
-    data_storage_root = "/gpfs1/home/qiusliang2/data_storage/synmf/"
+    home_root = ""
+    data_storage_root = ""
 
-    PRETRAIN_PATHS_TXT = home_root + "synmf/pretrain.txt"
-    VAL_PATHS_TXT = home_root + "synmf/valid.txt"
-    FINETUNE_PATHS_TXT = home_root + "synmf/finetune.txt"
-    TEST_PATHS_TXT = home_root + "synmf/test.txt"
+    PRETRAIN_PATHS_TXT = home_root + "DIMF-TAD/pretrain.txt"
+    VAL_PATHS_TXT = home_root + "DIMF-TAD/valid.txt"
+    FINETUNE_PATHS_TXT = home_root + "DIMF-TAD/finetune.txt"
+    TEST_PATHS_TXT = home_root + "DIMF-TAD/test.txt"
 
     MODEL_SAVE_PATH = data_storage_root + "trained_synmf_model.pth"
     MODEL_LOAD_PATH = data_storage_root + "trained_synmf_model.pth"
