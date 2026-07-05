@@ -13,9 +13,6 @@ import matplotlib.patches as patches
 import KR_norm_juicer as KRnorm
 
 
-# ==========================================
-# 0. 早停止辅助类 (Early Stopping)
-# ==========================================
 class EarlyStopping:
     def __init__(self, patience=5, min_delta=0.0, verbose=True):
         self.patience = patience
@@ -41,9 +38,7 @@ class EarlyStopping:
         return self.early_stop
 
 
-# ==========================================
-# 1. 基础参数与工具类
-# ==========================================
+
 class Parameters:
     def __init__(self, n=None, K=3, p=5, b=2.0, overlap_threshold=0.7, resolution=40000):
         self.n = n
@@ -87,15 +82,12 @@ class ClusterUtils:
         L = np.zeros_like(H, dtype=np.int32)
         clusters = []
 
-        # 获取全局因子的最大激活强度
         global_max = np.max(H)
 
         for k in range(K):
             col = H[:, k]
             col_max = np.max(col)
 
-            # 【核心改进 1】：摒弃基于全局总能量均值的粗暴过滤，防止大 TAD 通道压制小 TAD 导致漏检。
-            # 改为基于最大响应值的相对比例过滤（仅过滤几乎无响应的无用随机通道）。
             if col_max < 1e-4 or col_max < (global_max * 0.08):
                 continue
 
@@ -112,20 +104,13 @@ class ClusterUtils:
 
 
 def rescue_unassigned_gaps(clusters, n, A_sub, boundary_probs, min_len, max_len, density_threshold=1.15):
-    """
-    【核心新增】：基于 GCN 边界预测和局部区域接触密度的“盲区救援算法”。
-    旨在定位对角线上没有被任何 TAD 覆盖的 Gap 区域，
-    若该区域内相互作用强度显著高于其与外界的交叉强度，或两端具有较强的 GCN 边界置信度，则强行收复为新的 TAD。
-    """
     if not clusters:
-        # 如果当前层没有检测到任何域，以整个区间作为候选
         sorted_clusters = []
     else:
         sorted_clusters = sorted(list(set(clusters)), key=lambda x: x[0])
 
     gaps = []
 
-    # 1. 搜寻所有未分配的 Gap 区间
     if not sorted_clusters:
         gaps.append((0, n - 1))
     else:
@@ -141,17 +126,15 @@ def rescue_unassigned_gaps(clusters, n, A_sub, boundary_probs, min_len, max_len,
 
     rescued_clusters = list(sorted_clusters)
 
-    # 2. 评估 Gap，执行救援
     for gap_s, gap_e in gaps:
         gap_len = gap_e - gap_s + 1
         if gap_len < min_len:
             continue
 
-        # 计算 Gap 内部的平均交互密度
         gap_matrix = A_sub[gap_s:gap_e + 1, gap_s:gap_e + 1]
         intra_density = np.mean(gap_matrix)
 
-        # 计算 Gap 与左右邻域的外界交互密度
+
         context = min(gap_len, 8)
         left_bg = A_sub[max(0, gap_s - context):gap_s, gap_s:gap_e + 1] if gap_s > 0 else np.array([])
         right_bg = A_sub[gap_s:gap_e + 1, gap_e + 1:min(n, gap_e + 1 + context)] if gap_e < n - 1 else np.array([])
@@ -163,17 +146,14 @@ def rescue_unassigned_gaps(clusters, n, A_sub, boundary_probs, min_len, max_len,
         inter_density = np.mean(bg_vals) if bg_vals else 1e-5
         contrast_ratio = intra_density / (inter_density + 1e-9)
 
-        # 获取 GCN 端点边界预测概率最大值
         edge_w = min(3, gap_len // 2)
         left_prob = np.max(boundary_probs[max(0, gap_s - 1):gap_s + edge_w]) if gap_s > 0 else 0.5
         right_prob = np.max(boundary_probs[gap_e - edge_w:min(n, gap_e + 2)]) if gap_e < n - 1 else 0.5
 
-        # 救援条件：内部凝聚力高（对角线接触多），或者两端预测的边界信号很强
         if contrast_ratio > density_threshold or (left_prob + right_prob > 0.65):
             if gap_len <= max_len:
                 rescued_clusters.append((gap_s, gap_e))
             else:
-                # 超过 max_len 则利用 GCN 边界概率寻找最佳分割点
                 mid_s = gap_s + min_len
                 mid_e = gap_e - min_len
                 if mid_e > mid_s:
@@ -265,9 +245,6 @@ def pre_process(mat, percent=99.9):
     return mat
 
 
-# ==========================================
-# 2. AI 模型架构 (安全无阻断版)
-# ==========================================
 class GraphConvolution(nn.Module):
     def __init__(self, in_features, out_features, residual=False):
         super(GraphConvolution, self).__init__()
@@ -386,10 +363,6 @@ class DynamicAI_SymNMF_Predictor(nn.Module):
 
         return loss_NMF, H_new, boundary_logits
 
-
-# ==========================================
-# 3. 预训练流程
-# ==========================================
 def bounds_to_target_matrix_overlapping(n, bounds, sigma=1.2):
     target = np.zeros((n, n), dtype=np.float32)
     boundary_labels = np.zeros(n, dtype=np.float32)
@@ -592,20 +565,18 @@ def supervised_pretrain(model, dataloader, val_dataloader=None, epochs=5, lr=1e-
         else:
             print(f"Epoch {epoch}: Train Loss = {avg_loss:.4f}")
             if early_stopping.step(avg_loss, model):
-                print(f"[Pre-training 早停止] 加载历史最佳权重中...")
+                print(f"[Pre-training early stop] Loading previously best parameters...")
                 model.load_state_dict(early_stopping.best_state)
                 break
 
     if not early_stopping.early_stop and early_stopping.best_state is not None:
-        print("[Pre-training 结束] 加载整个预训练过程中指标最佳的模型参数。")
+        print("[Pre-training ends] Loading previously best parameters...")
         model.load_state_dict(early_stopping.best_state)
 
     return model
 
 
-# ==========================================
-# 4. 局部微调与后处理
-# ==========================================
+
 def optimize_params_with_AI(A_sub_np, model, base_params, fine_tune_epochs=20, device='cuda'):
     n = A_sub_np.shape[0]
     if n < base_params['min_tad_bins']: return []
@@ -649,7 +620,6 @@ def optimize_params_with_AI(A_sub_np, model, base_params, fine_tune_epochs=20, d
     min_len = base_params['min_tad_bins']
     max_len = min(base_params['max_tad_bins'], n)
 
-    # 1. 提取聚类候选区间 (经过能量过滤优化)
     clusters, _ = ClusterUtils.find_column_clusters(
         H_np,
         p=base_params['p'],
@@ -660,11 +630,9 @@ def optimize_params_with_AI(A_sub_np, model, base_params, fine_tune_epochs=20, d
 
     valid_clusters = [(s, e) for s, e in clusters if s != -1 and not (s == 0 and e == n - 1)]
 
-    # 2. 重叠去重
     overlap_threshold = base_params.get('overlap_threshold', 0.7)
     final_clusters = merge_overlapping_tads(valid_clusters, overlap_threshold=overlap_threshold)
 
-    # 3. 【核心改进 2】：盲区 Gap 双重机制恢复，强力解决空档不识别的问题
     final_clusters = rescue_unassigned_gaps(
         final_clusters,
         n,
@@ -675,16 +643,12 @@ def optimize_params_with_AI(A_sub_np, model, base_params, fine_tune_epochs=20, d
         density_threshold=1.45
     )
 
-    # 4. 微小空隙闭合与扩张
     max_gap = base_params.get('max_gap_to_close', 4)
     final_clusters = close_small_gaps_and_expand(final_clusters, n, max_gap=max_gap)
 
     return final_clusters
 
 
-# ==========================================
-# 5. 主干网络: 层次化 TAD 识别
-# ==========================================
 def main_hierarchical(A, model, datafile_name, max_layers=2, p=5, b=2.0, overlap_threshold=0.7, device='cuda',
                       write_tsv="./output_tsv",
                       data_stat="real", resolution=40000):
@@ -989,9 +953,6 @@ def load_matrices_from_dirs2(file_list_path):
     return matrices, filenames
 
 
-# ==========================================
-# 6. 全局微调 (含早停止逻辑)
-# ==========================================
 def freeze_bn(model):
     for m in model.modules():
         if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d)):
@@ -1064,12 +1025,12 @@ def global_fine_tune(model, target_matrices, epochs=10, lr=1e-5, device='cuda', 
               f"Weighted Reg: {weighted_reg_contribution:.4f} (Raw Reg: {avg_reg:.6f})")
 
         if early_stopping.step(avg_loss, model):
-            print(f"[Global Fine-tuning 早停止] 提前结束。加载历史最佳权重中...")
+            print(f"[Global Fine-tuning early stop] Loading previously best parameters...")
             model.load_state_dict(early_stopping.best_state)
             break
 
     if not early_stopping.early_stop and early_stopping.best_state is not None:
-        print("[Global Fine-tuning 结束] 加载整个微调过程中指标最佳的模型参数。")
+        print("[Global Fine-tuning ends] Loading previously best parameters...")
         model.load_state_dict(early_stopping.best_state)
 
     return model
@@ -1109,39 +1070,26 @@ def plot_hierarchical_tad_heatmap(A, hierarchical_tads, title="Hierarchical TAD 
     plt.show()
 
 
-# ==========================================
-# 7. 主运行程序
-# ==========================================
 if __name__ == "__main__":
-    profile = "hpc"
     write_tsv = "/gpfs1/home/qiusliang2/result8/hic/v7_182/"
-    # profile = "autoDL"
-    # write_tsv = "/root/autodl-tmp/results/hic/v7_182/"
     data_stat = "sim"
     plot_name = ""
 
     max_K = 30
     resolution = 25000
 
-    if profile == "hpc":
-        home_root = "/gpfs1/home/qiusliang2/"
-        data_storage_root = "/gpfs1/home/qiusliang2/data_storage/synmf/"
-    elif profile == "autoDL":
-        home_root = "/root/"
-        data_storage_root = "/root/autodl-tmp/"
-    else:
-        print("ERROR! Wrong profile input")
-        exit(0)
+    home_root = "/gpfs1/home/qiusliang2/"
+    data_storage_root = "/gpfs1/home/qiusliang2/data_storage/synmf/"
 
     PRETRAIN_PATHS_TXT = home_root + "synmf/pretrain.txt"
     VAL_PATHS_TXT = home_root + "synmf/valid.txt"
     FINETUNE_PATHS_TXT = home_root + "synmf/finetune.txt"
     TEST_PATHS_TXT = home_root + "synmf/test.txt"
 
-    MODEL_SAVE_PATH = data_storage_root + "trained_synmf_modelv7_182_K30.pth"
-    MODEL_LOAD_PATH = data_storage_root + "trained_synmf_modelv7_182_K30.pth"
-    MODEL_LOAD_PATH = ""  # 第一次训练时留空
-    ADAPT_MODEL_SAVE_PATH = data_storage_root + "adapted_modelv7_182_K30.pth"
+    MODEL_SAVE_PATH = data_storage_root + "trained_synmf_model.pth"
+    MODEL_LOAD_PATH = data_storage_root + "trained_synmf_model.pth"
+    MODEL_LOAD_PATH = ""  # set empty for first time training
+    ADAPT_MODEL_SAVE_PATH = data_storage_root + "adapted_model.pth"
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -1227,9 +1175,6 @@ if __name__ == "__main__":
         torch.save(model.state_dict(), MODEL_SAVE_PATH)
         print(f"Model successfully saved to: {MODEL_SAVE_PATH}")
 
-    # ==========================================
-    # 2. 全局微调
-    # ==========================================
     print("\nLoading all fine-tune target matrices from txt...")
     finetune_matrix_dirs = load_matrix_dirs_from_txt2(FINETUNE_PATHS_TXT)
     if not finetune_matrix_dirs:
@@ -1249,8 +1194,6 @@ if __name__ == "__main__":
     torch.save(model.state_dict(), ADAPT_MODEL_SAVE_PATH)
     print(f"Fine-tuned model successfully saved to: {ADAPT_MODEL_SAVE_PATH}")
 
-    # ==========================================
-    # 3. 测试阶段
     # ==========================================
     print("\nLoading all test matrices from txt...")
     test_matrices, test_files = load_matrices_from_dirs2(TEST_PATHS_TXT)
